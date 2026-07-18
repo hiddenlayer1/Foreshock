@@ -1,0 +1,63 @@
+{
+  "aspect": {
+    "contentType": "application/json",
+    "value": "{\"platformSchema\":{\"com.linkedin.schema.OtherSchema\":{\"rawSchema\":\"\"}},\"created\":{\"actor\":\"urn:li:corpuser:datahub\",\"time\":0},\"lastModified\":{\"actor\":\"urn:li:corpuser:datahub\",\"time\":0},\"fields\":[{\"nullable\":false,\"fieldPath\":\"transaction_id\",\"description\":\"Authorization id.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"recursive\":false,\"nativeDataType\":\"VARCHAR(36)\"},{\"nullable\":false,\"fieldPath\":\"customer_id\",\"description\":\"Cardholder.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"recursive\":false,\"nativeDataType\":\"VARCHAR(36)\"},{\"nullable\":false,\"fieldPath\":\"amount\",\"description\":\"Authorized amount.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.NumberType\":{}}},\"recursive\":false,\"nativeDataType\":\"NUMBER(12,2)\"},{\"nullable\":false,\"fieldPath\":\"currency\",\"description\":\"ISO currency code.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"recursive\":false,\"nativeDataType\":\"VARCHAR(3)\"},{\"nullable\":false,\"fieldPath\":\"merchant_category\",\"description\":\"MCC code.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"recursive\":false,\"nativeDataType\":\"VARCHAR(8)\"},{\"nullable\":false,\"fieldPath\":\"occurred_at\",\"description\":\"Authorization time.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.TimeType\":{}}},\"recursive\":false,\"nativeDataType\":\"TIMESTAMP_NTZ\"}],\"schemaName\":\"raw.transactions\",\"version\":0,\"hash\":\"\",\"platform\":\"urn:li:dataPlatform:snowflake\"}"
+  },
+  "aspectName": "schemaMetadata",
+  "auditHeader": null,
+  "changeType": "UPSERT",
+  "created": {
+    "actor": "urn:li:corpuser:__datahub_system",
+    "impersonator": null,
+    "message": null,
+    "time": 1784411538365
+  },
+  "entityKeyAspect": null,
+  "entityType": "dataset",
+  "entityUrn": "urn:li:dataset:(urn:li:dataPlatform:snowflake,raw.transactions,PROD)",
+  "headers": null,
+  "previousAspectValue": {
+    "contentType": "application/json",
+    "value": "{\"created\":{\"actor\":\"urn:li:corpuser:datahub\",\"time\":0},\"platformSchema\":{\"com.linkedin.schema.OtherSchema\":{\"rawSchema\":\"\"}},\"lastModified\":{\"actor\":\"urn:li:corpuser:datahub\",\"time\":0},\"schemaName\":\"raw.transactions\",\"fields\":[{\"nullable\":false,\"fieldPath\":\"transaction_id\",\"description\":\"Authorization id.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"nativeDataType\":\"VARCHAR(36)\",\"recursive\":false},{\"nullable\":false,\"fieldPath\":\"customer_id\",\"description\":\"Cardholder.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"nativeDataType\":\"VARCHAR(36)\",\"recursive\":false},{\"nullable\":false,\"fieldPath\":\"amount\",\"description\":\"Authorized amount.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.NumberType\":{}}},\"nativeDataType\":\"NUMBER(12,2)\",\"recursive\":false},{\"nullable\":false,\"fieldPath\":\"currency\",\"description\":\"ISO currency code.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"nativeDataType\":\"VARCHAR(3)\",\"recursive\":false},{\"nullable\":false,\"fieldPath\":\"merchant_category\",\"description\":\"MCC code.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"nativeDataType\":\"VARCHAR(8)\",\"recursive\":false},{\"nullable\":false,\"fieldPath\":\"device_fingerprint\",\"description\":\"Hashed device signature supplied by the card-present terminal.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.StringType\":{}}},\"nativeDataType\":\"VARCHAR(64)\",\"recursive\":false},{\"nullable\":false,\"fieldPath\":\"occurred_at\",\"description\":\"Authorization time.\",\"isPartOfKey\":false,\"type\":{\"type\":{\"com.linkedin.schema.TimeType\":{}}},\"nativeDataType\":\"TIMESTAMP_NTZ\",\"recursive\":false}],\"version\":0,\"hash\":\"\",\"platform\":\"urn:li:dataPlatform:snowflake\"}"
+  },
+  "previousSystemMetadata": {
+    "aspectCreated": null,
+    "aspectModified": null,
+    "lastObserved": 1784411489614,
+    "lastRunId": "no-run-id-provided",
+    "pipelineName": null,
+    "properties": {
+      "clientId": "acryl-datahub",
+      "clientVersion": "1.6.0.15",
+      "eventSource": "RESTLI",
+      "isNoOp": "true",
+      "sourceIP": "10.89.1.1",
+      "telemetryTraceId": "000656e9ace64dd8d4c30f363253baf6"
+    },
+    "registryName": null,
+    "registryVersion": null,
+    "runId": "no-run-id-provided",
+    "version": "1"
+  },
+  "systemMetadata": {
+    "aspectCreated": null,
+    "aspectModified": null,
+    "lastObserved": 1784411538312,
+    "lastRunId": "no-run-id-provided",
+    "pipelineName": null,
+    "properties": {
+      "clientId": "acryl-datahub",
+      "clientVersion": "1.6.0.15",
+      "eventSource": "RESTLI",
+      "sourceIP": "10.89.1.1",
+      "telemetryEnqueuedAt": "1784411538495",
+      "telemetryLog": "false",
+      "telemetryQueueSpanId": "59b9f9f895b8bd05",
+      "telemetryTraceId": "000656e9af689b880df1319dfc1f6dbe"
+    },
+    "registryName": null,
+    "registryVersion": null,
+    "runId": "no-run-id-provided",
+    "version": "2"
+  }
+}
