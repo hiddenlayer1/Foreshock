@@ -10,7 +10,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from foreshock.blast_radius import assess, impacts_from_lineage
+from foreshock.blast_radius import (
+    affected_columns_from_lineage,
+    assess,
+    impacts_from_lineage,
+)
 from foreshock.mcl_event import from_mcl_record
 
 DATASET_URN = "urn:li:dataset:(urn:li:dataPlatform:snowflake,raw.transactions,PROD)"
@@ -128,6 +132,75 @@ def test_malformed_lineage_payload_yields_nothing() -> None:
         {"downstreams": {"searchResults": [{"entity": "not-a-mapping"}, {}]}}
     )
     assert assets == ()
+
+
+def test_column_lineage_names_the_derived_columns() -> None:
+    """Column-scoped results carry the downstream columns actually derived."""
+    payload = {
+        "downstreams": {
+            "searchResults": [
+                {
+                    "entity": {
+                        "urn": "urn:li:dataset:txn",
+                        "type": "DATASET",
+                        "name": "features.transaction_features",
+                    },
+                    "degree": 1,
+                    "lineageColumns": ["device_fingerprint_entropy"],
+                }
+            ]
+        }
+    }
+    affected = affected_columns_from_lineage(payload, "device_fingerprint")
+    assert len(affected) == 1
+    assert affected[0].source_column == "device_fingerprint"
+    assert affected[0].column == "device_fingerprint_entropy"
+    assert affected[0].dataset_name == "features.transaction_features"
+
+
+def test_one_column_can_reach_several_datasets() -> None:
+    payload = {
+        "downstreams": {
+            "searchResults": [
+                {
+                    "entity": {"urn": "urn:li:dataset:a", "type": "DATASET", "name": "a"},
+                    "degree": 1,
+                    "lineageColumns": ["amount_zscore"],
+                },
+                {
+                    "entity": {"urn": "urn:li:dataset:b", "type": "DATASET", "name": "b"},
+                    "degree": 1,
+                    "lineageColumns": ["lifetime_value"],
+                },
+            ]
+        }
+    }
+    affected = affected_columns_from_lineage(payload, "amount")
+    assert {a.column for a in affected} == {"amount_zscore", "lifetime_value"}
+
+
+def test_results_without_column_lineage_yield_nothing() -> None:
+    """A platform that emits no column lineage must not fabricate precision."""
+    payload = {
+        "downstreams": {
+            "searchResults": [
+                {
+                    "entity": {"urn": "urn:li:dataset:a", "type": "DATASET", "name": "a"},
+                    "degree": 1,
+                }
+            ]
+        }
+    }
+    assert affected_columns_from_lineage(payload, "amount") == ()
+
+
+def test_table_scoped_assessment_is_marked_imprecise() -> None:
+    """assess() is the fallback path, and must not claim column precision."""
+    radius = assess(
+        _event(["a", "b"], ["a"]), _lineage([("MLMODEL", "fraud_detector", 2)])
+    )
+    assert not radius.column_precise
+    assert radius.affected_columns == ()
 
 
 def test_summary_names_the_change_and_the_models() -> None:

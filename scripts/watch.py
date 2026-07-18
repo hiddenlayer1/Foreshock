@@ -57,6 +57,20 @@ def render(radius: BlastRadius) -> str:
         lines.append("  features affected:")
         for feature in radius.features:
             lines.append(f"    - {feature.name}  ({feature.degree} hop(s))")
+    if radius.affected_columns:
+        lines.append("")
+        lines.append("  column paths:")
+        for affected in radius.affected_columns:
+            lines.append(
+                f"    - {affected.source_column} -> "
+                f"{affected.dataset_name}.{affected.column}"
+            )
+    if not radius.column_precise and radius.impacted:
+        lines.append("")
+        lines.append(
+            "  NOTE: no column-level lineage available; showing everything "
+            "downstream of the table."
+        )
     if radius.truncated:
         lines.append("")
         lines.append("  NOTE: lineage graph truncated; impact may be wider.")

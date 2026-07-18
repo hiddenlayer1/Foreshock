@@ -49,6 +49,16 @@ class ImpactedAsset:
 
 
 @dataclass(frozen=True)
+class AffectedColumn:
+    """A downstream column derived from one that just changed."""
+
+    source_column: str
+    dataset_urn: str
+    dataset_name: str
+    column: str
+
+
+@dataclass(frozen=True)
 class BlastRadius:
     """What one change puts at risk."""
 
@@ -57,6 +67,11 @@ class BlastRadius:
     retyped_columns: tuple[str, ...]
     impacted: tuple[ImpactedAsset, ...]
     truncated: bool = False
+    affected_columns: tuple[AffectedColumn, ...] = ()
+    # Table-scoped analysis cannot tell which downstream assets depend on the
+    # specific column that changed, so it reports the whole subtree. Callers
+    # need to know which of the two they are reading.
+    column_precise: bool = False
 
     @property
     def models(self) -> tuple[ImpactedAsset, ...]:
@@ -157,6 +172,41 @@ def impacts_from_lineage(payload: Mapping[str, Any]) -> tuple[tuple[ImpactedAsse
     return tuple(assets), bool(downstreams.get("hasMore"))
 
 
+def affected_columns_from_lineage(
+    payload: Mapping[str, Any], source_column: str
+) -> tuple[AffectedColumn, ...]:
+    """Read a column-scoped ``get_lineage`` payload.
+
+    Each result carries ``lineageColumns``: the columns in that downstream
+    dataset computed from ``source_column``.
+    """
+    downstreams = payload.get("downstreams")
+    if not isinstance(downstreams, Mapping):
+        return ()
+
+    found: list[AffectedColumn] = []
+    for result in downstreams.get("searchResults") or ():
+        if not isinstance(result, Mapping):
+            continue
+        entity = result.get("entity")
+        if not isinstance(entity, Mapping):
+            continue
+        urn = entity.get("urn")
+        if not isinstance(urn, str):
+            continue
+        for column in result.get("lineageColumns") or ():
+            if isinstance(column, str):
+                found.append(
+                    AffectedColumn(
+                        source_column=source_column,
+                        dataset_urn=urn,
+                        dataset_name=str(entity.get("name") or _short(urn)),
+                        column=column,
+                    )
+                )
+    return tuple(found)
+
+
 def assess(event: MclEvent, lineage: Mapping[str, Any]) -> BlastRadius:
     """Combine a change with its downstream graph. Pure; no I/O."""
     diff = event.schema_field_diff()
@@ -176,10 +226,66 @@ async def analyze(tools: DataHubTools, event: MclEvent) -> BlastRadius | None:
     The pre-filter matters at estate scale: most metadata traffic is ownership
     and tag edits, and walking the graph for those would make the agent cost
     scale with total write volume rather than with risk.
+
+    When the change names specific columns, the walk is column-scoped so the
+    warning lists only assets that depend on those columns. Warning about every
+    model under a table is how an alerting tool earns a mute rule.
     """
     if not event.could_break_consumers:
         return None
-    lineage = await tools.downstream_lineage(event.entity_urn)
-    if not isinstance(lineage, Mapping):
+
+    diff = event.schema_field_diff()
+    changed = diff.removed + tuple(path for path, _, _ in diff.retyped)
+    if not changed:
+        # A whole-entity removal has no column to scope by; the entire subtree
+        # really is at risk.
+        lineage = await tools.downstream_lineage(event.entity_urn)
+        if not isinstance(lineage, Mapping):
+            return None
+        return assess(event, lineage)
+
+    table_lineage = await tools.downstream_lineage(event.entity_urn)
+    if not isinstance(table_lineage, Mapping):
         return None
-    return assess(event, lineage)
+    candidates, truncated = impacts_from_lineage(table_lineage)
+
+    affected: list[AffectedColumn] = []
+    for column in changed:
+        payload = await tools.downstream_lineage(event.entity_urn, column=column)
+        if isinstance(payload, Mapping):
+            affected.extend(affected_columns_from_lineage(payload, column))
+
+    if not affected:
+        # Column lineage is absent (not every platform emits it). Fall back to
+        # the table-scoped view rather than silently reporting "nothing at
+        # risk", and say so.
+        return assess(event, table_lineage)
+
+    affected_names = {a.column for a in affected}
+    affected_datasets = {a.dataset_urn for a in affected}
+
+    features = tuple(a for a in candidates if a.is_feature and a.name in affected_names)
+    model_urns: set[str] = set()
+    for feature in features:
+        payload = await tools.downstream_lineage(feature.urn)
+        if not isinstance(payload, Mapping):
+            continue
+        downstream, _ = impacts_from_lineage(payload)
+        model_urns.update(a.urn for a in downstream if a.is_model)
+
+    models = tuple(a for a in candidates if a.is_model and a.urn in model_urns)
+    datasets = tuple(
+        a
+        for a in candidates
+        if a.entity_type == DATASET_TYPE and a.urn in affected_datasets
+    )
+
+    return BlastRadius(
+        event=event,
+        removed_columns=diff.removed,
+        retyped_columns=tuple(path for path, _, _ in diff.retyped),
+        impacted=models + features + datasets,
+        truncated=truncated,
+        affected_columns=tuple(affected),
+        column_precise=True,
+    )

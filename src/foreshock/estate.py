@@ -23,6 +23,7 @@ from datahub.emitter.mce_builder import (
     make_ml_feature_table_urn,
     make_ml_feature_urn,
     make_ml_model_urn,
+    make_schema_field_urn,
 )
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.rest_emitter import DatahubRestEmitter
@@ -30,6 +31,9 @@ from datahub.metadata.schema_classes import (
     AuditStampClass,
     DatasetLineageTypeClass,
     DatasetPropertiesClass,
+    FineGrainedLineageClass,
+    FineGrainedLineageDownstreamTypeClass,
+    FineGrainedLineageUpstreamTypeClass,
     MLFeaturePropertiesClass,
     MLFeatureTablePropertiesClass,
     MLModelPropertiesClass,
@@ -67,12 +71,20 @@ class Column:
 
 @dataclass(frozen=True)
 class Table:
-    """One dataset in the estate, with the tables it derives from."""
+    """One dataset in the estate, with the tables it derives from.
+
+    ``derived_from`` maps each local column to the upstream ``(table, column)``
+    it is computed from. Without it, impact analysis can only say "something
+    downstream of this table" and has to warn about every model in the subtree.
+    With it, a change to one column resolves to the specific columns, and so the
+    specific models, that actually depend on it.
+    """
 
     name: str
     description: str
     columns: tuple[Column, ...]
     upstreams: tuple[str, ...] = ()
+    derived_from: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     @property
     def urn(self) -> str:
@@ -172,6 +184,14 @@ TABLES: tuple[Table, ...] = (
             Column("velocity_1h", "number", "NUMBER(6,0)", "Txn count, trailing hour."),
         ),
         upstreams=("raw.transactions",),
+        derived_from={
+            "transaction_id": ("raw.transactions", "transaction_id"),
+            "customer_id": ("raw.transactions", "customer_id"),
+            "amount_zscore": ("raw.transactions", "amount"),
+            "merchant_category_risk": ("raw.transactions", "merchant_category"),
+            "device_fingerprint_entropy": ("raw.transactions", "device_fingerprint"),
+            "velocity_1h": ("raw.transactions", "transaction_id"),
+        },
     ),
     Table(
         name="features.customer_features",
@@ -184,6 +204,16 @@ TABLES: tuple[Table, ...] = (
             Column("txn_count_30d", "number", "NUMBER(6,0)", "Txn count, trailing 30d."),
         ),
         upstreams=("raw.customers", "raw.transactions"),
+        derived_from={
+            "customer_id": ("raw.customers", "customer_id"),
+            "tenure_days": ("raw.customers", "signup_date"),
+            "country": ("raw.customers", "country"),
+            # Reaches into the transaction table, so dropping `amount` does
+            # endanger the churn model even though dropping
+            # `device_fingerprint` does not.
+            "lifetime_value": ("raw.transactions", "amount"),
+            "txn_count_30d": ("raw.transactions", "transaction_id"),
+        },
     ),
 )
 
@@ -333,11 +363,29 @@ def _table_proposals(
                             type=DatasetLineageTypeClass.TRANSFORMED,
                         )
                         for name in table.upstreams
-                    ]
+                    ],
+                    fineGrainedLineages=_fine_grained(table),
                 ),
             )
         )
     return proposals
+
+
+def _fine_grained(table: Table) -> list[FineGrainedLineageClass]:
+    """Column-to-column edges for one table, from its ``derived_from`` map."""
+    edges = []
+    for local_column, (upstream_table, upstream_column) in table.derived_from.items():
+        upstream_urn = make_dataset_urn(DATA_PLATFORM, upstream_table, ENVIRONMENT)
+        edges.append(
+            FineGrainedLineageClass(
+                upstreamType=FineGrainedLineageUpstreamTypeClass.FIELD_SET,
+                upstreams=[make_schema_field_urn(upstream_urn, upstream_column)],
+                downstreamType=FineGrainedLineageDownstreamTypeClass.FIELD,
+                downstreams=[make_schema_field_urn(table.urn, local_column)],
+                confidenceScore=1.0,
+            )
+        )
+    return edges
 
 
 def _feature_proposals(feature: Feature) -> list[MetadataChangeProposalWrapper]:

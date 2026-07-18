@@ -85,18 +85,28 @@ class DataHubTools:
         return None
 
     async def downstream_lineage(
-        self, urn: str, *, max_hops: int = UNLIMITED_HOPS, max_results: int = 50
+        self,
+        urn: str,
+        *,
+        column: str | None = None,
+        max_hops: int = UNLIMITED_HOPS,
+        max_results: int = 50,
     ) -> Any:
-        """Everything that depends on ``urn``, transitively."""
-        return await self.call(
-            "get_lineage",
-            {
-                "urn": urn,
-                "upstream": False,
-                "max_hops": max_hops,
-                "max_results": max_results,
-            },
-        )
+        """Everything that depends on ``urn``, transitively.
+
+        Passing ``column`` narrows the walk to that column's own lineage, and
+        each result then carries ``lineageColumns`` naming the downstream
+        columns actually derived from it.
+        """
+        arguments: dict[str, Any] = {
+            "urn": urn,
+            "upstream": False,
+            "max_hops": max_hops,
+            "max_results": max_results,
+        }
+        if column is not None:
+            arguments["column"] = column
+        return await self.call("get_lineage", arguments)
 
     async def lineage_path(self, source_urn: str, target_urn: str) -> Any:
         """The concrete hop chain from a change to one thing it endangers."""
