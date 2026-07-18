@@ -72,13 +72,13 @@ class MclSource:
     """
 
     def __init__(self, config: SourceConfig | None = None) -> None:
-        self._config = config or SourceConfig()
-        registry = SchemaRegistryClient({"url": self._config.schema_registry_url})
-        subject = f"{self._config.topic}-value"
+        self.config = config or SourceConfig()
+        registry = SchemaRegistryClient({"url": self.config.schema_registry_url})
+        subject = f"{self.config.topic}-value"
         schema = registry.get_latest_version(subject).schema
         self._deserializer = AvroDeserializer(registry, schema.schema_str)
-        self._consumer = Consumer(self._config.consumer_settings())
-        self._consumer.subscribe([self._config.topic])
+        self._consumer = Consumer(self.config.consumer_settings())
+        self._consumer.subscribe([self.config.topic])
 
     def poll(self, timeout: float = 1.0) -> MclEvent | None:
         """Return the next usable event, or ``None`` if the timeout expired."""
