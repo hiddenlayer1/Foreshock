@@ -61,7 +61,19 @@ and says so rather than reporting a narrow result it cannot support.
 ## Quickstart
 
 Bring up DataHub Core (see [docs/running-datahub-on-podman.md](docs/running-datahub-on-podman.md)
-if you use Podman — three things bite), then:
+if you use Podman — three things bite), then run both scenarios end to end:
+
+```bash
+pip install -e ".[dev]"
+python scripts/demo.py --annotate
+```
+
+That seeds the estate, makes both changes against the live instance, reports each
+blast radius from the resulting Kafka events, writes the findings back into DataHub,
+and restores the schema so it can be run again. It takes about 25 seconds. Drop
+`--annotate` to see what it *would* write without writing anything.
+
+### Running the pieces separately
 
 ```bash
 pip install -e ".[dev]"

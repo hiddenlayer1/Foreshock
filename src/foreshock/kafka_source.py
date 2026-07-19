@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from confluent_kafka import Consumer, KafkaError, KafkaException
+from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroDeserializer
 from confluent_kafka.serialization import MessageField, SerializationContext
@@ -71,14 +71,24 @@ class MclSource:
     single unusable record must not stall an agent's stream.
     """
 
-    def __init__(self, config: SourceConfig | None = None) -> None:
+    def __init__(self, config: SourceConfig | None = None, *, subscribe: bool = True) -> None:
+        """Open a consumer.
+
+        ``subscribe=True`` joins the consumer group and follows the topic, which
+        is what a long-running subscriber wants. Pass ``subscribe=False`` when
+        the caller intends :meth:`assign_from_end`; the two are mutually
+        exclusive in librdkafka and mixing them fails silently (see that
+        method).
+        """
         self.config = config or SourceConfig()
         registry = SchemaRegistryClient({"url": self.config.schema_registry_url})
         subject = f"{self.config.topic}-value"
         schema = registry.get_latest_version(subject).schema
         self._deserializer = AvroDeserializer(registry, schema.schema_str)
         self._consumer = Consumer(self.config.consumer_settings())
-        self._consumer.subscribe([self.config.topic])
+        self._subscribed = subscribe
+        if subscribe:
+            self._consumer.subscribe([self.config.topic])
 
     def poll(self, timeout: float = 1.0) -> MclEvent | None:
         """Return the next usable event, or ``None`` if the timeout expired."""
@@ -98,6 +108,47 @@ class MclSource:
         if not isinstance(record, Mapping):
             return None
         return from_mcl_record(record)
+
+    def assign_from_end(self, timeout: float = 20.0) -> None:
+        """Read only what happens after this call.
+
+        ``subscribe`` plus ``auto.offset.reset=latest`` races: a change emitted
+        before the group finishes rebalancing is missed. Assigning explicitly to
+        the current end offsets removes the race, which matters for a scripted
+        demo where the change is emitted a moment after the subscription opens.
+
+        Requires a source built with ``subscribe=False``. Subscribing first and
+        assigning afterwards does not raise and leaves ``assignment()``
+        reporting the partitions, but the consumer then delivers nothing at all
+        — a silent dead stream. Refusing it outright is the only way that
+        failure stays cheap to diagnose.
+        """
+        if self._subscribed:
+            raise RuntimeError(
+                "assign_from_end() requires MclSource(..., subscribe=False). "
+                "A subscribed consumer that is later assigned reports a valid "
+                "assignment and silently receives no messages."
+            )
+
+        metadata = self._consumer.list_topics(self.config.topic, timeout=timeout)
+        partitions = list(metadata.topics[self.config.topic].partitions)
+        ends = []
+        for partition in partitions:
+            _, high = self._consumer.get_watermark_offsets(
+                TopicPartition(self.config.topic, partition), timeout=timeout
+            )
+            ends.append(TopicPartition(self.config.topic, partition, high))
+        self._consumer.assign(ends)
+
+        # assign() is asynchronous: the fetchers are not live until the client
+        # has been polled. Returning before that opens exactly the race this
+        # method exists to close, so wait for the assignment to be readable.
+        # Polling here cannot consume anything, since the offsets are the end
+        # of the log.
+        deadline = timeout
+        while deadline > 0 and not self._consumer.assignment():
+            self._consumer.poll(0.2)
+            deadline -= 0.2
 
     def commit(self) -> None:
         """Acknowledge everything handled so far."""
