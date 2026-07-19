@@ -1,11 +1,13 @@
 # Running DataHub Core on Podman
 
-DataHub's quickstart targets Docker. It does run on Podman, but three things bite.
-This is the exact path that worked, recorded so the stack can be brought up from
+DataHub's quickstart targets Docker. It does run on Podman, but three things bite
+on the CLI path, and two more if you fall back to driving compose yourself. This
+is the exact path that worked, recorded so the stack can be brought up from
 scratch without rediscovering them.
 
 Verified 2026-07-18 against `acryl-datahub` 1.6.0.15 and DataHub `v1.5.0.6`,
-Podman 5.8.2 on a WSL2 machine.
+Podman 5.8.2 on a WSL2 machine. Compose-fallback path re-verified 2026-07-19
+from a fully stopped stack.
 
 ## 1. Point the Docker API at Podman
 
@@ -69,11 +71,49 @@ datahub docker quickstart
 ```
 
 If the CLI creates the containers but leaves them in `Created` without starting
-them, drive the compose file directly with the variables from step 3:
+them, drive the compose file directly with the variables from step 3 — plus the
+two below, both of which fail quietly rather than loudly.
+
+### 4. `--profile quickstart`, or you get Kafka and nothing else
+
+Every service except `kafka-broker` sits behind the `quickstart` compose profile.
+Without the flag, `up -d` starts the broker, prints no warning, and **exits 0** —
+so it reads as success right up until GMS is not there.
+
+### 5. `HOME` must be set if you are on Windows
+
+The compose file uses `${HOME}` as the bind-mount source for `.datahub/plugins`,
+`.datahub/search` and `.aws`. PowerShell has no `HOME` — it is `USERPROFILE` —
+so the sources resolve to `/.datahub/search` and Podman fails them with exactly
+the `statfs ... no such file or directory` from step 2. Compose warns
+`The "HOME" variable is not set`, which is easy to scroll past.
 
 ```bash
-docker compose -p datahub -f ~/.datahub/quickstart/docker-compose.yml up -d
+export HOME="${HOME:?}"   # already set on Linux/macOS; no-op there
+docker compose -p datahub -f ~/.datahub/quickstart/docker-compose.yml \
+  --profile quickstart up -d
 ```
+
+PowerShell, where both traps actually bite:
+
+```powershell
+$env:DOCKER_HOST = 'npipe:////./pipe/podman-machine-default'
+$env:HOME        = $env:USERPROFILE
+$env:DATAHUB_VERSION = 'v1.5.0.6'
+$env:UI_INGESTION_DEFAULT_CLI_VERSION = '1.5.0.6'
+Get-Content "$env:USERPROFILE\.datahub\quickstart\.local-secrets.env" |
+  ForEach-Object {
+    if ($_ -match '^\s*([^#=]+)=(.*)$') {
+      [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim())
+    }
+  }
+docker compose -p datahub -f "$env:USERPROFILE\.datahub\quickstart\docker-compose.yml" `
+  --profile quickstart up -d
+```
+
+Startup is ordered: OpenSearch, Kafka and MySQL must report healthy before
+`system-update` runs, and GMS only starts once that job has exited 0. Allow a
+few minutes from cold.
 
 ## Verifying
 
