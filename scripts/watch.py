@@ -18,6 +18,9 @@ import argparse
 import asyncio
 import sys
 
+from datahub.emitter.rest_emitter import DatahubRestEmitter
+
+from foreshock.annotate import apply_annotations, ensure_tag, plan_annotations
 from foreshock.blast_radius import BlastRadius, analyze
 from foreshock.datahub_tools import ToolsConfig, open_tools
 from foreshock.kafka_source import MclSource, SourceConfig
@@ -89,9 +92,15 @@ async def run(args: argparse.Namespace) -> int:
     print(f"watching {source.config.topic} (offset={args.offset})", flush=True)
     print("waiting for metadata changes; Ctrl-C to stop\n", flush=True)
 
+    if args.annotate:
+        ensure_tag(DatahubRestEmitter(gms_server=args.gms))
+        print("write-back ENABLED: at-risk assets will be tagged in DataHub\n", flush=True)
+
     seen = 0
     try:
-        async with open_tools(ToolsConfig(gms_url=args.gms)) as tools:
+        async with open_tools(
+            ToolsConfig(gms_url=args.gms, enable_mutations=args.annotate)
+        ) as tools:
             while True:
                 event = source.poll(1.0)
                 if event is None:
@@ -108,6 +117,19 @@ async def run(args: argparse.Namespace) -> int:
                         )
                     continue
                 print(render(radius), flush=True)
+
+                plan = plan_annotations(radius)
+                if not plan.is_empty:
+                    if args.annotate:
+                        writes = await apply_annotations(tools, plan)
+                        print(f"\n  wrote back: {plan.describe()} ({writes} call(s))", flush=True)
+                    else:
+                        print(
+                            f"\n  would write back: {plan.describe()}  "
+                            "(re-run with --annotate)",
+                            flush=True,
+                        )
+
                 source.commit()
                 if args.once and radius.is_actionable:
                     return 0
@@ -128,6 +150,11 @@ def main() -> int:
     parser.add_argument("--group", default="foreshock-watch")
     parser.add_argument("--offset", default="latest", choices=["earliest", "latest"])
     parser.add_argument("--once", action="store_true", help="Exit after one finding.")
+    parser.add_argument(
+        "--annotate",
+        action="store_true",
+        help="Write findings back to DataHub. Without it, writes are only described.",
+    )
     parser.add_argument("--verbose", action="store_true", help="Show skipped events.")
     args = parser.parse_args()
     return asyncio.run(run(args))
