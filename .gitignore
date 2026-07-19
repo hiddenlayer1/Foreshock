@@ -9,3 +9,8 @@ build/
 .env
 .env.local
 .datahub/
+
+# Private-term list for scripts/compliance_scan.py. Never commit: this
+# repository is public, and the file holds the very names the scanner exists
+# to keep out of the submission.
+compliance-terms.local.txt
