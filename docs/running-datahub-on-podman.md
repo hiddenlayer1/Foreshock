@@ -133,6 +133,53 @@ A healthy stack looks like this:
 | `datahub-mysql-1` | Up (healthy) |
 | `datahub-system-update-quickstart-1` | Exited (0) — a migration job, exiting 0 is success |
 
+## When search breaks but the stack still reports healthy
+
+The failure worth knowing about, because nothing in the health table catches it.
+
+OpenSearch can die on its own hours after a clean start, and **GMS keeps
+reporting healthy without it**. `/health` returns 200, the UI loads, and the
+containers look fine. What breaks is every search-backed GraphQL query:
+
+```
+Failed to execute search: entity types [DATASET], query *, ...
+  extensions: { code: 500, type: SERVER_ERROR }
+```
+
+Anything that resolves entities by search fails; anything that reads an aspect
+by URN still works. That split is the tell.
+
+Confirm it in one call:
+
+```bash
+docker ps -a --filter name=opensearch      # Exited (127) (unhealthy)
+curl -s http://localhost:9200/_cluster/health
+```
+
+The container log ends in `pthread_create failed (EAGAIN)` and
+`java.lang.OutOfMemoryError: unable to create native thread`. That reads as a
+thread-limit problem and is not one — `/proc/sys/kernel/threads-max` is six
+figures and nowhere near reached. It is memory: each thread stack needs about a
+megabyte of *free* memory, and when the machine has only a few hundred
+megabytes genuinely free the JVM cannot get one. `OOMKilled` stays `false`
+because nothing was killed by the cgroup — the allocation simply failed.
+
+Recovery is just a restart; the indices are on a volume and survive:
+
+```bash
+docker start datahub-opensearch-1
+curl -s http://localhost:9200/_cluster/health    # red -> yellow, ~1 min
+```
+
+Wait for `red` to clear before using the stack. `red` means shards are still
+recovering and search will keep failing; `yellow` is the healthy steady state
+for a single node, because replica shards have nowhere to go and stay
+unassigned by design. Do not chase `green` here.
+
+To stop it recurring, give the machine memory rather than restarting on a
+schedule — DataHub's JVMs plus whatever else shares the machine is what
+exhausts it. `free -h` inside the machine is the number that matters.
+
 ## Ports
 
 `9002` UI · `8080` GMS · `9092` Kafka · `3306` MySQL · `9200` OpenSearch.
