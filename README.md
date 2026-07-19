@@ -40,9 +40,65 @@ metadata-mutation time. It is deliberately *not* runtime pipeline gating and *no
 policy engine — those are DataHub Cloud's paid surface, and reimplementing them would
 compete with the product rather than extend it.
 
-## Status
+## What it does, demonstrated
 
-Early. Setup instructions, fixture seeding, and demo steps land as the build progresses.
+Foreshock scopes the warning to the **column** that changed, not the table. Same table,
+two different columns, against a live DataHub Core instance:
+
+| Dropped column | Downstream assets reported | Models flagged |
+|---|---|---|
+| `device_fingerprint` | 3 | `fraud_detector` |
+| `amount` | 6 | `fraud_detector`, `churn_predictor` |
+
+The second row is the control. `amount` really does feed `lifetime_value` in
+`customer_features`, so `churn_predictor` is genuinely downstream and is correctly
+reported — which is what makes the first row precision rather than a walk that stopped
+early. Warning about models that are fine is how a tool like this earns a mute rule.
+
+Where a platform emits no column-level lineage, the analysis falls back to table scope
+and says so rather than reporting a narrow result it cannot support.
+
+## Quickstart
+
+Bring up DataHub Core (see [docs/running-datahub-on-podman.md](docs/running-datahub-on-podman.md)
+if you use Podman — three things bite), then:
+
+```bash
+pip install -e ".[dev]"
+
+# 1. Seed a synthetic ML estate: raw tables -> feature tables -> models,
+#    with column-level lineage.
+python scripts/seed_estate.py
+
+# 2. Watch the change stream.
+python scripts/watch.py
+
+# 3. In another shell, break something.
+python -c "from datahub.emitter.rest_emitter import DatahubRestEmitter; \
+           from foreshock.estate import drop_column; \
+           drop_column(DatahubRestEmitter('http://127.0.0.1:8080'), \
+                       'raw.transactions', 'device_fingerprint')"
+```
+
+The warning appears in the watcher within seconds. Nothing polls — it arrives because
+DataHub emitted the change and Foreshock was subscribed to it.
+
+To capture a fresh MCL envelope as a test fixture:
+
+```bash
+python scripts/capture_mcl.py
+```
+
+## Tests
+
+```bash
+pytest
+```
+
+The suite runs without a broker or a DataHub instance. Envelope projection and
+blast-radius ranking are pure functions; a checked-in fixture captured from a real
+DataHub instance pins the contract to observed behaviour rather than to an assumption
+about it.
 
 ## Requirements
 
