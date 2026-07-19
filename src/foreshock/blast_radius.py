@@ -251,7 +251,13 @@ async def analyze(tools: DataHubTools, event: MclEvent) -> BlastRadius | None:
 
     affected: list[AffectedColumn] = []
     for column in changed:
-        payload = await tools.downstream_lineage(event.entity_urn, column=column)
+        try:
+            payload = await tools.downstream_lineage(event.entity_urn, column=column)
+        except (TimeoutError, RuntimeError):
+            # A column walk that fails costs precision, not correctness: the
+            # table-scoped fallback below still reports the change, flagged as
+            # imprecise. Losing the warning entirely would be the worse trade.
+            continue
         if isinstance(payload, Mapping):
             affected.extend(affected_columns_from_lineage(payload, column))
 
@@ -267,7 +273,10 @@ async def analyze(tools: DataHubTools, event: MclEvent) -> BlastRadius | None:
     features = tuple(a for a in candidates if a.is_feature and a.name in affected_names)
     model_urns: set[str] = set()
     for feature in features:
-        payload = await tools.downstream_lineage(feature.urn)
+        try:
+            payload = await tools.downstream_lineage(feature.urn)
+        except (TimeoutError, RuntimeError):
+            continue
         if not isinstance(payload, Mapping):
             continue
         downstream, _ = impacts_from_lineage(payload)

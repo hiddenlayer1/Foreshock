@@ -11,6 +11,7 @@ module does is a call into tooling the sponsor already maintains.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -34,6 +35,10 @@ class ToolsConfig:
     gms_token: str | None = None
     # Mutations are off unless explicitly enabled, so a dry run cannot write.
     enable_mutations: bool = False
+    # A lineage walk on a large or overloaded estate can hang indefinitely.
+    # A subscriber that blocks forever on one event stops seeing every later
+    # one, which is worse than giving up on the event in hand.
+    call_timeout_seconds: float = 45.0
     extra_env: dict[str, str] = field(default_factory=dict)
 
     def server_env(self) -> dict[str, str]:
@@ -58,8 +63,9 @@ class ToolsConfig:
 class DataHubTools:
     """Typed wrapper over the DataHub MCP tools Foreshock actually uses."""
 
-    def __init__(self, session: ClientSession) -> None:
+    def __init__(self, session: ClientSession, timeout_seconds: float = 45.0) -> None:
         self._session = session
+        self._timeout = timeout_seconds
 
     async def call(self, name: str, arguments: dict[str, Any]) -> Any:
         """Invoke a tool and decode its payload.
@@ -67,8 +73,18 @@ class DataHubTools:
         MCP returns content blocks; the DataHub server puts a JSON document in
         the first text block. Anything that is not JSON is handed back as text
         so a caller can still surface it in an error.
+
+        Raises ``TimeoutError`` rather than waiting forever, so one slow walk
+        cannot silently stall the whole subscription.
         """
-        result = await self._session.call_tool(name, arguments)
+        try:
+            result = await asyncio.wait_for(
+                self._session.call_tool(name, arguments), timeout=self._timeout
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"{name} did not return within {self._timeout}s"
+            ) from exc
         if result.isError:
             detail = "; ".join(
                 block.text for block in result.content if hasattr(block, "text")
@@ -146,4 +162,4 @@ async def open_tools(config: ToolsConfig | None = None) -> AsyncIterator[DataHub
     async with stdio_client(settings.server_parameters()) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            yield DataHubTools(session)
+            yield DataHubTools(session, settings.call_timeout_seconds)

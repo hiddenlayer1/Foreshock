@@ -107,7 +107,18 @@ async def run(args: argparse.Namespace) -> int:
                     await asyncio.sleep(0)
                     continue
                 seen += 1
-                radius = await analyze(tools, event)
+                try:
+                    radius = await analyze(tools, event)
+                except (TimeoutError, RuntimeError) as exc:
+                    # Do NOT commit: the offset stays put so this event is
+                    # retried rather than silently dropped. One unhealthy walk
+                    # must not end the subscription.
+                    print(
+                        f"\n  ! analysis failed for {event.entity_urn}: {exc}"
+                        "\n    offset not committed; will retry.",
+                        flush=True,
+                    )
+                    continue
                 if radius is None:
                     if args.verbose:
                         print(
@@ -121,8 +132,17 @@ async def run(args: argparse.Namespace) -> int:
                 plan = plan_annotations(radius)
                 if not plan.is_empty:
                     if args.annotate:
-                        writes = await apply_annotations(tools, plan)
-                        print(f"\n  wrote back: {plan.describe()} ({writes} call(s))", flush=True)
+                        try:
+                            writes = await apply_annotations(tools, plan)
+                            print(
+                                f"\n  wrote back: {plan.describe()} ({writes} call(s))",
+                                flush=True,
+                            )
+                        except (TimeoutError, RuntimeError) as exc:
+                            # The warning was already reported, which is the
+                            # part that matters; a failed write is worth saying
+                            # out loud but not worth losing the subscription.
+                            print(f"\n  ! write-back failed: {exc}", flush=True)
                     else:
                         print(
                             f"\n  would write back: {plan.describe()}  "
