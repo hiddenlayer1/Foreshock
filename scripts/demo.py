@@ -24,11 +24,20 @@ import time
 
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.rest_emitter import DatahubRestEmitter
+from datahub.ingestion.graph.client import DatahubClientConfig, DataHubGraph
 
-from foreshock.annotate import apply_annotations, ensure_tag, plan_annotations
+from foreshock.annotate import (
+    apply_annotations,
+    clear_annotations,
+    ensure_tag,
+    plan_annotations,
+)
 from foreshock.blast_radius import BlastRadius, analyze
 from foreshock.datahub_tools import DataHubTools, ToolsConfig, open_tools
 from foreshock.estate import (
+    FEATURES,
+    MODELS,
+    TABLES,
     drop_column,
     schema_metadata,
     seed_estate,
@@ -150,15 +159,38 @@ async def _run_scenario(
     return True
 
 
+def _clear_tags(emitter: DatahubRestEmitter, gms: str) -> int:
+    """Take Foreshock's tags back off the estate.
+
+    Restoring the schema is not enough on its own: tags outlive it, so without
+    this a second run starts with the first run's findings already in place and
+    the control model is no longer clean.
+    """
+    graph = DataHubGraph(DatahubClientConfig(server=gms))
+    return clear_annotations(
+        graph,
+        emitter,
+        entity_urns=[m.urn for m in MODELS] + [f.urn for f in FEATURES],
+        dataset_urns=[t.urn for t in TABLES],
+    )
+
+
 async def run(args: argparse.Namespace) -> int:
     emitter = DatahubRestEmitter(gms_server=args.gms)
     emitter.test_connection()
+
+    if args.reset_tags:
+        cleared = _clear_tags(emitter, args.gms)
+        print(f"cleared Foreshock tags from {cleared} entity(ies)/dataset(s).")
+        return 0
 
     print("seeding the ML estate (idempotent)...")
     seed_estate(emitter)
     _restore(emitter)
     if args.annotate:
         ensure_tag(emitter)
+        # Start from a clean slate so each run's findings are its own.
+        _clear_tags(emitter, args.gms)
 
     source = MclSource(
         SourceConfig(
@@ -169,12 +201,18 @@ async def run(args: argparse.Namespace) -> int:
         subscribe=False,
     )
 
+    scenarios = (
+        tuple(s for s in SCENARIOS if s[0] == args.scenario)
+        if args.scenario
+        else SCENARIOS
+    )
+
     ok = True
     try:
         async with open_tools(
             ToolsConfig(gms_url=args.gms, enable_mutations=args.annotate)
         ) as tools:
-            for column, framing, expected in SCENARIOS:
+            for column, framing, expected in scenarios:
                 ok &= await _run_scenario(
                     tools, source, emitter, column, framing, expected, args.annotate
                 )
@@ -183,11 +221,16 @@ async def run(args: argparse.Namespace) -> int:
 
     print()
     print(_rule())
-    if ok:
+    if not ok:
+        print("  Demo did not complete; see errors above.")
+    elif len(scenarios) > 1:
         print("  Same table, two columns, two different answers.")
         print("  The blast radius follows the column, not the table.")
     else:
-        print("  Demo did not complete; see errors above.")
+        # One scenario on its own cannot show precision — that claim needs the
+        # control — so do not let the closing line imply it did.
+        print(f"  One scenario only: {scenarios[0][0]}.")
+        print("  Run without --scenario for the control that proves precision.")
     print(_rule())
     return 0 if ok else 1
 
@@ -201,6 +244,16 @@ def main() -> int:
     )
     parser.add_argument(
         "--annotate", action="store_true", help="Also write findings back to DataHub."
+    )
+    parser.add_argument(
+        "--scenario",
+        choices=[column for column, _, _ in SCENARIOS],
+        help="Run just one scenario instead of both.",
+    )
+    parser.add_argument(
+        "--reset-tags",
+        action="store_true",
+        help="Remove Foreshock's tags from the estate and exit.",
     )
     args = parser.parse_args()
     return asyncio.run(run(args))

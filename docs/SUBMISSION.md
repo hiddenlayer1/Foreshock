@@ -151,7 +151,7 @@ unavailable.
 - Write-back is idempotent and independently verified in DataHub.
 - One command runs the entire argument in about 25 seconds and restores state,
   so it is re-runnable: `python scripts/demo.py --annotate`.
-- 75 tests pass with no broker and no DataHub instance required.
+- 78 tests pass with no broker and no DataHub instance required.
 
 ## What I learned
 
@@ -188,7 +188,12 @@ python scripts/demo.py --annotate
 
 Seeds a synthetic ML estate, makes both changes against a live instance,
 reports each blast radius from the resulting Kafka events, writes the findings
-back, and restores the schema so it can be run again.
+back, and restores both the schema and the tags so it can be run again.
+
+Restoring the tags is not cosmetic. The control case is that `churn_predictor`
+comes out clean, so a tag left behind by an earlier run would silently break
+the one result the demo exists to prove. `--scenario` runs either half on its
+own; `--reset-tags` clears the estate without running anything.
 
 ## Provenance
 

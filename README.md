@@ -70,8 +70,20 @@ python scripts/demo.py --annotate
 
 That seeds the estate, makes both changes against the live instance, reports each
 blast radius from the resulting Kafka events, writes the findings back into DataHub,
-and restores the schema so it can be run again. It takes about 25 seconds. Drop
-`--annotate` to see what it *would* write without writing anything.
+and restores both the schema and the tags so it can be run again. It takes about
+25 seconds. Drop `--annotate` to see what it *would* write without writing anything.
+
+Restoring the tags matters as much as restoring the schema: the control case is
+that `churn_predictor` stays clean, and a tag left behind by the previous run
+would quietly destroy it.
+
+```bash
+# Run one scenario on its own.
+python scripts/demo.py --annotate --scenario device_fingerprint
+
+# Take Foreshock's tags back off the estate without running anything.
+python scripts/demo.py --reset-tags
+```
 
 ### Running the pieces separately
 

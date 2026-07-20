@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from foreshock.annotate import AT_RISK_TAG_URN, plan_annotations
+from datahub.metadata.schema_classes import TagAssociationClass
+
+from foreshock.annotate import AT_RISK_TAG_URN, plan_annotations, tags_without_at_risk
 from foreshock.blast_radius import AffectedColumn, BlastRadius, ImpactedAsset
 from foreshock.mcl_event import from_mcl_record
 
@@ -107,3 +109,21 @@ def test_describe_mentions_what_would_be_written() -> None:
     described = plan_annotations(_radius()).describe()
     assert AT_RISK_TAG_URN in described
     assert "entity" in described
+
+
+def test_clearing_removes_the_foreshock_tag() -> None:
+    kept = tags_without_at_risk(
+        [TagAssociationClass(tag=AT_RISK_TAG_URN), TagAssociationClass(tag="urn:li:tag:pii")]
+    )
+    assert kept is not None
+    assert [t.tag for t in kept] == ["urn:li:tag:pii"]
+
+
+def test_clearing_leaves_other_peoples_tags_alone() -> None:
+    """A demo reset must not be collateral damage for tags Foreshock did not write."""
+    assert tags_without_at_risk([TagAssociationClass(tag="urn:li:tag:pii")]) is None
+
+
+def test_clearing_an_untagged_asset_writes_nothing() -> None:
+    """None signals "no change", so the reset does not emit a pointless aspect."""
+    assert tags_without_at_risk([]) is None

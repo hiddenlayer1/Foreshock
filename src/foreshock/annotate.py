@@ -16,11 +16,18 @@ single, removable tag.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.rest_emitter import DatahubRestEmitter
-from datahub.metadata.schema_classes import TagPropertiesClass
+from datahub.ingestion.graph.client import DataHubGraph
+from datahub.metadata.schema_classes import (
+    EditableSchemaMetadataClass,
+    GlobalTagsClass,
+    TagAssociationClass,
+    TagPropertiesClass,
+)
 
 from foreshock.blast_radius import BlastRadius
 from foreshock.datahub_tools import DataHubTools
@@ -117,4 +124,72 @@ async def apply_annotations(tools: DataHubTools, plan: AnnotationPlan) -> int:
             },
         )
         writes += 1
+    return writes
+
+
+def tags_without_at_risk(
+    tags: Sequence[TagAssociationClass],
+) -> list[TagAssociationClass] | None:
+    """Drop the Foreshock tag. ``None`` means nothing would change.
+
+    Filtering rather than clearing the aspect so that a tag somebody else put
+    on the estate is not collateral damage of a demo reset.
+    """
+    kept = [tag for tag in tags if tag.tag != AT_RISK_TAG_URN]
+    return None if len(kept) == len(tags) else kept
+
+
+def clear_annotations(
+    graph: DataHubGraph,
+    emitter: DatahubRestEmitter,
+    *,
+    entity_urns: Iterable[str],
+    dataset_urns: Iterable[str],
+) -> int:
+    """Remove every Foreshock tag from the estate. Returns writes performed.
+
+    The demo restores the schema it changed so it can be run again, but a tag
+    written on one run outlives that restore. Without this, a second run
+    inherits the first run's findings and the control case stops being a
+    control: the model that is supposed to stay clean is still carrying a tag
+    from last time, which is exactly the claim the demo exists to make.
+
+    Entity tags and column tags live in different aspects — ``globalTags`` on
+    the entity, ``editableSchemaMetadata`` on the owning dataset — so both are
+    swept.
+    """
+    writes = 0
+
+    for urn in entity_urns:
+        current = graph.get_aspect(urn, GlobalTagsClass)
+        if current is None:
+            continue
+        kept = tags_without_at_risk(current.tags)
+        if kept is None:
+            continue
+        emitter.emit(
+            MetadataChangeProposalWrapper(
+                entityUrn=urn, aspect=GlobalTagsClass(tags=kept)
+            )
+        )
+        writes += 1
+
+    for urn in dataset_urns:
+        current = graph.get_aspect(urn, EditableSchemaMetadataClass)
+        if current is None:
+            continue
+        changed = False
+        for field_info in current.editableSchemaFieldInfo:
+            if field_info.globalTags is None:
+                continue
+            kept = tags_without_at_risk(field_info.globalTags.tags)
+            if kept is None:
+                continue
+            field_info.globalTags = GlobalTagsClass(tags=kept)
+            changed = True
+        if not changed:
+            continue
+        emitter.emit(MetadataChangeProposalWrapper(entityUrn=urn, aspect=current))
+        writes += 1
+
     return writes
