@@ -120,7 +120,28 @@ few minutes from cold.
 ```bash
 curl -o /dev/null -w '%{http_code}\n' http://localhost:8080/health   # GMS  -> 200
 curl -o /dev/null -w '%{http_code}\n' http://localhost:9002          # UI   -> 200
+curl -s http://localhost:9200/_cluster/health                        # -> yellow or green
 ```
+
+**Check OpenSearch explicitly. The first two checks pass without it.** GMS keeps
+answering `/health` with 200 and the UI keeps serving after OpenSearch has died,
+so the stack looks up by the two obvious probes while every search and lineage
+query fails underneath. Observed 2026-07-19: the only visible symptom was the
+demo failing on a GraphQL search error with both HTTP checks green.
+
+`yellow` is correct on a single node — replica shards have nowhere to go. `red`
+or a refused connection means it is down:
+
+```bash
+docker start datahub-opensearch-1
+```
+
+If it exits 127 shortly after starting, that is the JVM dying, not a missing
+command — check the logs for
+`OutOfMemoryError: unable to create native thread`. OpenSearch wants headroom
+the machine may not have if other containers are running. Free memory elsewhere
+rather than resizing the Podman machine, which stops it and bounces every other
+container on the host.
 
 A healthy stack looks like this:
 
