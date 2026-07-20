@@ -74,6 +74,37 @@ def column_tags(gms: str, dataset_urn: str) -> dict[str, list[str]]:
     return found
 
 
+def table_columns(gms: str, dataset_urn: str) -> list[str]:
+    payload = _aspect(gms, dataset_urn, "schemaMetadata")
+    if payload is None:
+        return []
+    body = payload.get("aspect", {}).get("com.linkedin.schema.SchemaMetadata", {})
+    return [field["fieldPath"] for field in body.get("fields", [])]
+
+
+def show_estate(gms: str) -> int:
+    """Print the estate as DataHub currently holds it.
+
+    Orientation before verdicts. It also shows the thing the whole design turns
+    on: nothing in a table's own schema says which models depend on it.
+    """
+    print()
+    print(_rule())
+    print("  The estate, as DataHub currently holds it")
+    print(_rule())
+    for table in TABLES:
+        columns = table_columns(gms, table.urn)
+        print(f"  {table.name}")
+        for column in columns:
+            print(f"    {column}")
+        print()
+    print(_rule())
+    print("  Nothing here says which models depend on any of it.")
+    print(_rule())
+    print()
+    return 0
+
+
 def _verdict(tags: list[str]) -> str:
     return "AT RISK" if AT_RISK_TAG_URN in tags else "clean"
 
@@ -126,9 +157,14 @@ def run(gms: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gms", default="http://127.0.0.1:8080")
+    parser.add_argument(
+        "--estate",
+        action="store_true",
+        help="print the estate's schema instead of the write-back verdicts",
+    )
     args = parser.parse_args()
     try:
-        return run(args.gms)
+        return show_estate(args.gms) if args.estate else run(args.gms)
     except urllib.error.URLError as exc:
         print(f"cannot reach GMS at {args.gms}: {exc}", file=sys.stderr)
         return 1
